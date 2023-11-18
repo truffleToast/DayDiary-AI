@@ -1,8 +1,4 @@
-from flask import Flask, request, jsonify
-import json
-import os
 from PIL import Image
-import requests 
 # from flask_cors import CORS, cross_origin #flask 보안 및 cross 
 import cv2 # opencv
 from diffusers import StableDiffusionInpaintPipeline # 인페인팅 모델 
