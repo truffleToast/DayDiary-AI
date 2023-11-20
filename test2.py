@@ -28,3 +28,6 @@ pipe = pipe.to("cuda")
 prompt = "background"
 image = pipe(prompt=prompt, image=init_image, mask_image=mask_image).images[0]
 image.save("removed2.png")
+
+#A100  
+

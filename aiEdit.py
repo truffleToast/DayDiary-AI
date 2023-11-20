@@ -104,10 +104,10 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
         # 요청이 실패했을 경우 오류 처리
         return jsonify({'error': '이미지 생성에 실패했습니다.'})
 @app.route("/removeObject", methods = ['POST'])
-# 이미지 소스 가져오기 -> 
+# 이미지 소스 가져오기 -> fastSAM -> 아미지 제거 요청 -> 최종 결과 보여주기
 def eraseMyImg():
     data= request.form
-    source =request.files.get('image', None)
+    source =request.files.get('image', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
     image_file =request.files.get('image', None) #form 태그에 input 태그에 name이 myfile인 객체 담기
     # image = Image.open(io.BytesIO(source.read()))  # BytesIO를 사용하여 PIL 이미지로 변환
     image_bytes = source.read()
