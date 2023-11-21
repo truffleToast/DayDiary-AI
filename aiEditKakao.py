@@ -65,7 +65,7 @@ REST_API_KEY= '9b22d611c336e7a4d4e647a0a3c40a96'
 Samodel = FastSAM('FastSAM-s.pt')  # or FastSAM-x.pt
 
 #자바 실제 파일 위치  -> 여기에 temp 만들어서 진행할것
-javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst.server.core\tmp1\webapps" # TODO AWS 로 옮기기
+javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst.server.core\tmp0\webapps" # TODO AWS 로 옮기기
 # 로컬에서 실제 폴더에 접근이 안되는 현상. 
 #CORS 플라스크 보안해제 -> localhost:8081에서나 localhost8080의 경우는 허락해준다. 원래는 SOP에 의해 하나의 프로토콜에서 오는것만 허락하게됨 
 app = Flask(__name__)
