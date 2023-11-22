@@ -80,7 +80,7 @@ temp_folder_path = os.path.join(javaPath, temp_folder)
 # 랜덤 스트링 
 @app.route("/removeBg", methods = ['post'])
 def imgEdit():
-    image_file =request.files.get('myfile', None) #form 태그에 input 태그에 name이 myfile인 객체 담기
+    image_file =request.files.get('myfile1', None) #form 태그에 input 태그에 name이 myfile인 객체 담기
     if image_file: #이미지 파일이 있다면
         file_name =image_file.filename #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
         image_path = os.path.join(javaPath, temp_folder, file_name + ".png") # 자바에서 이런형식으로 저장되게 설정해야함
@@ -134,10 +134,10 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
         return jsonify({'error': '이미지 생성에 실패했습니다.'})
 @app.route("/removeObject", methods = ['POST'])
 # 이미지 소스 가져오기 -> fastSAM(source) -> 아미지 제거 요청(png, jpg,webp 등) -> 최종 결과 보여주기
-def eraseMyImg():
+def eraseMyImg():   
     # 폼 데이터를 변수 data에 저장
     data= request.form
-    source =request.files.get('image', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
+    source =request.files.get('myfile2', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
     print(source)
     #임시 파일 생성 및 저장
     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
@@ -185,7 +185,7 @@ def eraseMyImg():
 def changeBack():
     # 폼 데이터를 변수 data에 저장
     data= request.form
-    source =request.files.get('image', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
+    source =request.files.get('myfile3', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
     print(source)
     #임시 파일 생성 및 저장
     with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
@@ -197,7 +197,7 @@ def changeBack():
     horizion = int(data['x'])
     print(temp_file_path, vertical, horizion)
     # image안에서 객체찾기 실행 -> 즉 model.compile
-    everything_results = model(temp_file_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
+    everything_results = Samodel(temp_file_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
     prompt_process = FastSAMPrompt(temp_file_path, everything_results, device='cpu')
     #사용자가 지정한 위치에서 모든 범위를 확인해야함 
