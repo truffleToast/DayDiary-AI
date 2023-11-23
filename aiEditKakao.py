@@ -13,6 +13,7 @@ import base64
 import tempfile
 
 
+
 #여기서부터는 karlo api 사용법 -> api키를 발급 받고 json파일을 보내면 됨, 기본확장자는 webp 이므로 png로 변경했습니다.
 def t2i(prompt, negative_prompt): 
     r = requests.post(
@@ -62,7 +63,7 @@ def imageToString(img): #Karlo API 코드이므로 건들 필요 X
 REST_API_KEY= '9b22d611c336e7a4d4e647a0a3c40a96'
 
 #FastSam 모델 활용하기
-Samodel = FastSAM('FastSAM-s.pt')  # or FastSAM-x.pt
+Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
 
 #자바 실제 파일 위치  -> 여기에 temp 만들어서 진행할것
 javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst.server.core\tmp0\webapps" # TODO AWS 로 옮기기
