@@ -13,12 +13,32 @@ import io
 from io import BytesIO
 import base64
 import tempfile
+
+
 # app.py
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed, FileRequired
 from werkzeug.utils import secure_filename
 import boto3
 from config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET
+
+import random
+import time
+def randomTime():
+    # 현재 시간으로 시드 설정
+    current_time = time.time()
+    random.seed(current_time)
+
+    # 이제 난수 생성
+    random_number = random.random()
+    print("Random number:", random_number)
+
+    # 범위 내 난수 생성 예시
+    random_number_in_range = random.randint(1, 100)
+    print("Random number between 1 and 100:", random_number_in_range)
+    return str(random_number)
+
+
 
 app = Flask(__name__)
 CORS(app)
@@ -102,83 +122,42 @@ temp_folder_path = os.path.join(javaPath, temp_folder)
 def removeBg():
     image_file = request.files['image']
     if image_file: #이미지 파일이 있다면
-        file_name =image_file.filename #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-        image_path = os.path.join(javaPath, temp_folder, file_name + ".png") # 자바에서 이런형식으로 저장되게 설정해야함
+        filename = image_file.filename 
+        file_extension = filename.split('.')[-1].lower()
+        file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
+        image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
 
         image_file.save(image_path)
         # 배경 제거
         input_image = Image.open(image_path) # IMAGE -> PIL library에서 제공하는 PIL 구조의 형태로 열어준다.
         output_image = remove(input_image) # rembg에 담겨있는 remove를 통해 배경을 제거 
         # 결과 이미지 경로
-        image_url = os.path.join(javaPath,temp_folder, file_name + '_no bg.png') #결과 이미지를 저장 
-        output_image.save(image_url) #같은 폴더에 '+_nobg.png'만 붙여서 저장
-        
-        in_memory_file = BytesIO()
-        output_image.save(in_memory_file, format='PNG')
-        in_memory_file.seek(0)  # 파일 포인터를 시작으로 이동
+        # image_url = os.path.join(javaPath,temp_folder, file_name + '_nobg.' +file_extension) #결과 이미지를 저장 
+        # output_image.save(image_url) #같은 폴더에 '+_nobg.png'만 붙여서 저장
 
-    
-        # # aws 업로드 하는 로직
-        folder_path = 'EditPage/Flask_img/'     
-        filename = secure_filename(image_file.filename)
-        key = folder_path + filename +"_nobg"
-
-        # S3에 이미지 업로드
-        s3.upload_fileobj(image_url, S3_BUCKET, key)
-        image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
-        
-        #로컬에 있는 데이터 삭제
-        # os.remove(image_url)
-        # os.remove(image_path)
-       # 클라이언트에 이미지 url
-        res= {'image_url': image_url} #client는 json 객체를 뜯어서 src를 확인하고 그것을 유저에게 띄워줌
-        return jsonify(res) #ajax로 돌아가 함수 구현
-    else:
-        return jsonify({"error": "No image file provided."}), 400 # 오류
-
-
-
-
-# 랜덤 스트링 
-@app.route("/removeBg", methods = ['post'])
-def imgEdit():
-    # image_file =request.files.get('image', None) #form 태그에 input 태그에 name이 myfile인 객체 담기
-    image_file = request.files['image']  
-    if image_file: #이미지 파일이 있다면
-        file_name =image_file.filename #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-        image_path = os.path.join(javaPath, temp_folder, file_name + ".png") # 자바에서 이런형식으로 저장되게 설정해야함
-
-        image_file.save(image_path)
-        # 배경 제거
-        input_image = Image.open(image_path) # IMAGE -> PIL library에서 제공하는 PIL 구조의 형태로 열어준다.
-        output_image = remove(input_image) # rembg에 담겨있는 remove를 통해 배경을 제거         
-        # 결과 이미지 경로
-        image_url = os.path.join(javaPath,temp_folder, file_name + '_no bg.png') #결과 이미지를 저장 
-        output_image.save(image_url) #같은 폴더에 '+_nobg.png'만 붙여서 저장
-        resultImage = Image.open(image_url) 
+        img_byte_arr = BytesIO()
+        output_image.save(img_byte_arr, format='PNG')
+        # img_byte_arr = img_byte_arr.getvalue()
 
         # aws 업로드 하는 로직
         folder_path = 'EditPage/Flask_img/'     
-        filename = secure_filename(resultImage.filename)
-        key = folder_path + filename
+      
+        # secure_filename(input.filename)
+        key = folder_path + file_name +"_nobg.png"
 
         # S3에 이미지 업로드
-        # s3.upload_fileobj(resultImage, S3_BUCKET, key)
-        image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
+        s3.upload_fileobj(BytesIO(img_byte_arr.getvalue()), S3_BUCKET, key)
+        s3image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
         
-
-
-        #로컬에 있는 데이터 삭제
-        # os.remove(image_url)
-        # os.remove(image_path)
-
-        return jsonify({'message': 'Success', 'image_url': image_url})
+        #로컬에 있는 데이터 삭제    
+        os.remove(image_path)
        # 클라이언트에 이미지 url
-        res= {'image_url': image_url} #client는 json 객체를 뜯어서 src를 확인하고 그것을 유저에게 띄워줌
+        res= {'image_url': s3image_url} #client는 json 객체를 뜯어서 src를 확인하고 그것을 유저에게 띄워줌
         return jsonify(res) #ajax로 돌아가 함수 구현
     else:
         return jsonify({"error": "No image file provided."}), 400 # 오류
-        
+
+
 @app.route("/makeImg" ,methods=['POST']) #POST로 객체를 보내서 이미지를 만들어주라
 def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
     data = request.form # data는 request.form  
