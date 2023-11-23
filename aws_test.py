@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed, FileRequired
 from werkzeug.utils import secure_filename
