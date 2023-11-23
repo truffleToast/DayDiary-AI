@@ -198,20 +198,21 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
 def eraseMyImg():   
     # 폼 데이터를 변수 data에 저장
     data= request.form
-    source =request.files.get('myfile2', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
-    print(source)
-    #임시 파일 생성 및 저장
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
-        image = Image.open(source.stream)
-        image.save(temp_file.name)
-        temp_file_path = temp_file.name
+    image_file = request.files['image']
+    #파일 저장 -> 자바 경로에 저장 한 후 삭제하는 방향
+    filename = image_file.filename 
+    file_extension = filename.split('.')[-1].lower()
+    file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
+    image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+    # 로컬 파일에 잠시 세이브
+    image_file.save(image_path)
     vertical = int(data['y'])
     horizion = int(data['x'])
-    print(temp_file_path, vertical, horizion)
+    
     # image안에서 객체찾기 실행 -> 즉 model.compile
-    everything_results = Samodel(temp_file_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
+    everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
-    prompt_process = FastSAMPrompt(temp_file_path, everything_results, device='cpu')
+    prompt_process = FastSAMPrompt(image_path, everything_results, device='cpu')
     #사용자가 지정한 위치에서 모든 범위를 확인해야함 
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
@@ -227,6 +228,7 @@ def eraseMyImg():
     # prompt 설정 -> 여기서는 background
     prompt = "background"
 
+    image = Image.open(image_path)
     # 이미지를 Base64 인코딩하기
     img_base64 = imageToString(image)
     mask_base64 = imageToString(mask_image)
@@ -234,6 +236,9 @@ def eraseMyImg():
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
     
+    #로컬에 있는 데이터 삭제    
+    os.remove(image_path)
+
     print(response)
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
@@ -246,21 +251,26 @@ def eraseMyImg():
 def changeBack():
     # 폼 데이터를 변수 data에 저장
     data= request.form
-    source =request.files.get('myfile3', None) #None은 파일이 없을 경우 반환할 기본값을 지정하는 것
-    print(source)
+    image_file = request.files['image']
     #임시 파일 생성 및 저장
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
-        image = Image.open(source.stream)
-        image.save(temp_file.name)
-        temp_file_path = temp_file.name
+    # with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
+    #    image = Image.open(image_file.stream)
+    #    image.save(temp_file.name)
+    #     temp_file_path = temp_file.name
+    filename = image_file.filename 
+    file_extension = filename.split('.')[-1].lower()
+    file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
+    image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+    image_file.save(image_path)
+
     prompt = data['prompt']
     vertical = int(data['y'])
     horizion = int(data['x'])
-    print(temp_file_path, vertical, horizion)
+    print(image_path, vertical, horizion)
     # image안에서 객체찾기 실행 -> 즉 model.compile
-    everything_results = Samodel(temp_file_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
+    everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
-    prompt_process = FastSAMPrompt(temp_file_path, everything_results, device='cpu')
+    prompt_process = FastSAMPrompt(image_path, everything_results, device='cpu')
     #사용자가 지정한 위치에서 모든 범위를 확인해야함 
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
@@ -275,12 +285,15 @@ def changeBack():
     #그다음에는 생성 mask한 부분만 prompt를 background로 해서 생성하면 됨 -> 즉 생성모델
     #Karlo api에 보낼 수 있게 디코딩/인코딩
     # 이미지를 Base64 인코딩하기
+    image = Image.open(image_path)
+
     img_base64 = imageToString(image)
     mask_base64 = imageToString(mask_image)
 
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
-    
+    #로컬에 있는 데이터 삭제    
+    os.remove(image_path)
     print(response)
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
