@@ -20,7 +20,7 @@ from flask_wtf import FlaskForm
 from flask_wtf.file import FileField, FileAllowed, FileRequired
 from werkzeug.utils import secure_filename
 import boto3
-from config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET
+from config import AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET, REST_API_KEY
 
 import random
 import time
@@ -97,14 +97,32 @@ def imageToString(img): #Karlo API 코드이므로 건들 필요 X
     my_encoded_img = base64.encodebytes(img_byte_arr.getvalue()).decode('ascii') 
     return my_encoded_img
 
-#내 카카오 어플리케이션 키 
-REST_API_KEY= '9b22d611c336e7a4d4e647a0a3c40a96'
+
+
+#1024 * 1024 비율에 맞게 조정하기
+def adjust_coordinates(orig_width, orig_height, target_width, target_height, x, y):
+    if orig_width > 1024:
+        x_ratio = target_width / orig_width
+    else:
+        x_ratio = 1    
+    if orig_height >1024:    
+        y_ratio = target_height / orig_height
+    else:
+        y_ratio = 1 
+    adjusted_x = int(x * x_ratio)
+    adjusted_y = int(y * y_ratio)
+    return adjusted_x, adjusted_y
+
+
 
 #FastSam 모델 활용하기
 Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
 
 #자바 실제 파일 위치  -> 여기에 temp 만들어서 진행할것
 javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst.server.core\tmp0\webapps" # TODO AWS 로 
+# 
+tempPath ="./images/temp"
+
 
 # 옮기기
 # 로컬에서 실제 폴더에 접근이 안되는 현상. 
@@ -113,9 +131,7 @@ javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst
 
 # CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "http://localhost:8081"]}}) # localhost8081 localhost 8080 모두 가능
 #임시 이미지 저장 경로 설정
-temp_folder='temp' #테스트용 temp 폴더 만들어서 저장 ->실제로는 이클립스에 temp 만들어서 저장하고 서버를 나갈때 지금 있는 이미지를 지울 수 있게 처리해야함
 # 임시 폴더 경로 설정
-temp_folder_path = os.path.join(javaPath, temp_folder)
 # 이후에 파일 저장 로직 수행
 
 @app.route("/rembg", methods = ['POST'])
@@ -125,7 +141,7 @@ def removeBg():
         filename = image_file.filename 
         file_extension = filename.split('.')[-1].lower()
         file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-        image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+        image_path = os.path.join(tempPath,  file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
 
         image_file.save(image_path)
         # 배경 제거
@@ -201,14 +217,18 @@ def eraseMyImg():
     image_file = request.files['image']
     #파일 저장 -> 자바 경로에 저장 한 후 삭제하는 방향
     filename = image_file.filename 
-    file_extension = filename.split('.')[-1].lower()
+    file_extension = filename.split('.')[-1].lower()    
     file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-    image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+    image_path = os.path.join(tempPath, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
     # 로컬 파일에 잠시 세이브
     image_file.save(image_path)
     vertical = int(data['y'])
     horizion = int(data['x'])
-    
+
+    orig_width, orig_height = [horizion, vertical]
+    target_width, target_height = 1024, 1024
+    adjusted_horizon, adjusted_vertical = adjust_coordinates(orig_width, orig_height, target_width, target_height, horizion, vertical)
+
     # image안에서 객체찾기 실행 -> 즉 model.compile
     everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
@@ -217,7 +237,7 @@ def eraseMyImg():
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
-    prompt_process.point_prompt(points=[[horizion, vertical]], pointlabel=[1])
+    prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
     mask_result = prompt_process.results #마스킹한 데이터를 담고있는 객체
     print(mask_result) 
     masked_array = np.array(mask_result[0].masks.data[0]) # 객체에서 0번 데이터를 numpy_array로 처리  -> 여기서 오류 도와줘요 명훈쌤
@@ -229,6 +249,22 @@ def eraseMyImg():
     prompt = "background"
 
     image = Image.open(image_path)
+    image.resize(1024,1024)
+
+
+    #이미지 가능 부분이 1024 * 1024 이므로 이미지를 그에 맞게 축소하는 로직이 필요할 듯 함
+    # 원본이미지를 1024 * 1024로 바꿔야
+    #이미지 원본의 크기를
+    #이미지 원본의 크기를 보내고
+    # 그걸 python 변수로 저장 한다
+    # 이미지 처리 후
+    # 해당 이미지 원본 크기만큼 늘려서 저장하면
+    # 되지않을까요??
+    
+    # 11.30 일 추가부분
+
+
+
     # 이미지를 Base64 인코딩하기
     img_base64 = imageToString(image)
     mask_base64 = imageToString(mask_image)
@@ -242,6 +278,8 @@ def eraseMyImg():
     print(response)
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
+    #최종에서 찌그러지지 않게 다시 처리
+        
     res = {'image_url': image_url}
     return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기
 
@@ -260,7 +298,7 @@ def changeBack():
     filename = image_file.filename 
     file_extension = filename.split('.')[-1].lower()
     file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-    image_path = os.path.join(javaPath, temp_folder, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+    image_path = os.path.join(tempPath, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
     image_file.save(image_path)
 
     prompt = data['prompt']
