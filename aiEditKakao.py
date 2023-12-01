@@ -77,8 +77,8 @@ def inpainting(image, mask, prompt):
             json = {
                 'prompt': prompt,
                 'image': image,
-                'mask': mask, # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
-                'negative_prompt':'blurry, low_quality, watermark'
+                'mask': mask # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
+     
             },
             headers = {
                 'Authorization': f'KakaoAK {REST_API_KEY}',
@@ -119,7 +119,6 @@ def adjust_coordinates(original_width, original_height, target_size, horizion, v
 # karlo에 보내기 위해 1024*1024로 축소
 def image_resize(image_path):
     with Image.open(image_path) as img:
-
         new_width = img.width
         new_height = img.height
         if new_width <=1024 and new_height <=1024:
@@ -131,7 +130,7 @@ def image_resize(image_path):
             new_height = int(new_height * ratio)
         # 최종 크기로 이미지 조정
         resized_img = img.resize((new_width, new_height), Image.LANCZOS)
-    return resized_img
+        return resized_img
 
 def restore_image(input_path, output_path, original_width, orginal_height):
     with Image.open(input_path) as img:
@@ -147,9 +146,6 @@ Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
 #자바 실제 파일 위치  -> 여기에 temp 만들어서 진행할것
 
 tempPath ="./images/temp"
-
-mask_image_path = "./images/temp/mask"
-
 @app.route("/rembg", methods = ['POST'])
 def removeBg():
     image_file = request.files['image']
@@ -235,9 +231,9 @@ def eraseMyImg():
     filename = image_file.filename 
     file_extension = filename.split('.')[-1].lower()    
     file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-    image_path = os.path.join(tempPath, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+    image_path = os.path.join(tempPath, file_name +".") # 자바에서 이런형식으로 저장되게 설정해야함
     # 로컬 파일에 잠시 세이브
-    image_file.save(image_path)
+    image_file.save(image_path+file_extension)
     vertical = int(data['y'])
     horizion = int(data['x'])
     original_width =int(data['originalX'])
@@ -245,9 +241,9 @@ def eraseMyImg():
     target_size =1024
     adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
     # image안에서 객체찾기 실행 -> 즉 model.compile
-    everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
+    everything_results = Samodel(image_path+file_extension, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
-    prompt_process = FastSAMPrompt(image_path, everything_results, device='cpu')
+    prompt_process = FastSAMPrompt(image_path+file_extension, everything_results, device='cpu')
     #사용자가 지정한 위치에서 모든 범위를 확인해야함 
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
@@ -255,11 +251,13 @@ def eraseMyImg():
     mask_result = prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
     masked_array = np.array(mask_result[0].masks.data[0])    
     mask_image = Image.fromarray(masked_array)
-    mask_image.save(f"{mask_image_path}.png")
-    resized_mask =image_resize(f"{mask_image_path}.png")
+    mask_image.save(image_path+"mask.png")
     prompt = "background"
-    resized_img=image_resize(image_path)
-    #resized_img의 크기랑 안맞음
+    resized_mask =image_resize(image_path+"mask.png")
+    resized_img=image_resize(image_path+file_extension)
+
+
+
     # 이미지를 Base64 인코딩하기
     img_base64 = imageToString(resized_img)
     mask_base64 = imageToString(resized_mask)
@@ -268,9 +266,8 @@ def eraseMyImg():
     response = inpainting(img_base64,mask_base64,prompt)
     
     #로컬에 있는 데이터 삭제    
-    os.remove(image_path)
-
-    print(response)
+    os.remove(image_path+file_extension)
+    os.remove(image_path+"mask.png")
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
     #최종에서 찌그러지지 않게 다시 처리 //TODO 
@@ -285,11 +282,12 @@ def changeBack():
     # 폼 데이터를 변수 data에 저장
     data= request.form
     image_file = request.files['image']
+    #파일 저장 -> 자바 경로에 저장 한 후 삭제하는 방향
     filename = image_file.filename 
-    file_extension = filename.split('.')[-1].lower()
+    file_extension = filename.split('.')[-1].lower()    
     file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-    image_path = os.path.join(tempPath, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
-    image_file.save(image_path)
+    image_path = os.path.join(tempPath, file_name +".") # 자바에서 이런형식으로 저장되게 설정해야함
+    image_file.save(image_path+file_extension)
 
     prompt = data['prompt']
     vertical = int(data['y'])
@@ -300,21 +298,17 @@ def changeBack():
     target_size =1024
     adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
     # image안에서 객체찾기 실행 -> 즉 model.compile
-    everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
+    everything_results = Samodel(image_path+file_extension, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
-    prompt_process = FastSAMPrompt(image_path, everything_results, device='cpu')
+    prompt_process = FastSAMPrompt(image_path+file_extension, everything_results, device='cpu')
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
     mask_result = prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
     masked_array = np.array(mask_result[0].masks.data[0])    
     mask_image = Image.fromarray(masked_array)
-    #Sagmentaition 완료
-
-    mask_image.save(f"{mask_image_path}.png")
-
-    #마스크 크기와 실제 이미지 크기를 resize
-    resized_mask =image_resize(f"{mask_image_path}.png")
-    resized_img=image_resize(image_path)
+    mask_image.save(image_path+"mask.png")
+    resized_mask =image_resize(image_path+"mask.png")
+    resized_img=image_resize(image_path+file_extension)
    
     
     #Karlo api에 보낼 수 있게 디코딩/인코딩
@@ -324,8 +318,8 @@ def changeBack():
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
     #로컬에 있는 데이터 삭제    
-    os.remove(image_path)
-    os.remove(f"mask_image_path.png")
+    os.remove(image_path+file_extension)
+    os.remove(image_path+"mask.png")
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
 
@@ -336,6 +330,3 @@ def changeBack():
 if __name__ == '__main__':
     # 외부에서 접근 가능하도록 호스트 설정 ('0.0.0.0'으로 설정하면 모든 네트워크 인터페이스에서 접근 가능)
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
-
-
-
