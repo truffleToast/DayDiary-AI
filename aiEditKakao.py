@@ -99,36 +99,45 @@ def imageToString(img): #Karlo API 코드이므로 건들 필요 X
 
 
 
-#1024 * 1024 비율에 맞게 조정하기
-def adjust_coordinates(orig_width, orig_height, target_width, target_height, x, y):
-    if orig_width > 1024:
-        x_ratio = target_width / orig_width
+#1024 * 1024 비율에 맞게 조정하기 사용자 위치 수정하기
+def adjust_coordinates(orginal_width, orginal_height, target_size,  horizion, vertical):
+    if orginal_width > target_size:
+        x_ratio = target_size / orginal_width
     else:
         x_ratio = 1    
-    if orig_height >1024:    
-        y_ratio = target_height / orig_height
+    if orginal_height >1024:    
+        y_ratio = target_size / orginal_height
     else:
         y_ratio = 1 
-    adjusted_x = int(x * x_ratio)
-    adjusted_y = int(y * y_ratio)
+    adjusted_x = int(horizion * x_ratio)
+    adjusted_y = int(vertical * y_ratio)
     return adjusted_x, adjusted_y
 
+def image_resize(image_path,original_width, original_height):
+    with Image.open(image_path) as img:
+        # 원본 이미지의 가로와 세로 비율 계산
+        ratio = min(1024 / original_width, 1024 / original_height)
+        # 새로운 크기 계산
+        new_width = int(original_width * ratio)
+        new_height = int(original_height * ratio)
+
+        # 이미지 크기 조정
+        resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
+
+    return resized_img
 
 
 #FastSam 모델 활용하기
 Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
 
 #자바 실제 파일 위치  -> 여기에 temp 만들어서 진행할것
-javaPath = r"C:\eGovFrame-4.0.0\workspace.edu\.metadata\.plugins\org.eclipse.wst.server.core\tmp0\webapps" # TODO AWS 로 
-# 
+
 tempPath ="./images/temp"
 
 
 # 옮기기
 # 로컬에서 실제 폴더에 접근이 안되는 현상. 
 #CORS 플라스크 보안해제 -> localhost:8081에서나 localhost8080의 경우는 허락해준다. 원래는 SOP에 의해 하나의 프로토콜에서 오는것만 허락하게됨 
-
-
 # CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "http://localhost:8081"]}}) # localhost8081 localhost 8080 모두 가능
 #임시 이미지 저장 경로 설정
 # 임시 폴더 경로 설정
@@ -141,7 +150,7 @@ def removeBg():
         filename = image_file.filename 
         file_extension = filename.split('.')[-1].lower()
         file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
-        image_path = os.path.join(tempPath,  file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
+        image_path = os.path.join(tempPath, file_name +"."+ file_extension) # 자바에서 이런형식으로 저장되게 설정해야함
 
         image_file.save(image_path)
         # 배경 제거
@@ -224,10 +233,11 @@ def eraseMyImg():
     image_file.save(image_path)
     vertical = int(data['y'])
     horizion = int(data['x'])
+    original_width =int(data['OriginalX'])
+    original_height=int(data['OriginalY'])
 
-    orig_width, orig_height = [horizion, vertical]
-    target_width, target_height = 1024, 1024
-    adjusted_horizon, adjusted_vertical = adjust_coordinates(orig_width, orig_height, target_width, target_height, horizion, vertical)
+    target_size =1024
+    adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
 
     # image안에서 객체찾기 실행 -> 즉 model.compile
     everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
@@ -248,8 +258,7 @@ def eraseMyImg():
     # prompt 설정 -> 여기서는 background
     prompt = "background"
 
-    image = Image.open(image_path)
-    image.resize(1024,1024)
+
 
 
     #이미지 가능 부분이 1024 * 1024 이므로 이미지를 그에 맞게 축소하는 로직이 필요할 듯 함
@@ -264,9 +273,10 @@ def eraseMyImg():
     # 11.30 일 추가부분
 
 
+    resized_img=image_resize(image_path,original_width, original_height)
 
     # 이미지를 Base64 인코딩하기
-    img_base64 = imageToString(image)
+    img_base64 = imageToString(resized_img)
     mask_base64 = imageToString(mask_image)
 
     # 이미지 변환하기 REST API 호출
@@ -278,8 +288,8 @@ def eraseMyImg():
     print(response)
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
-    #최종에서 찌그러지지 않게 다시 처리
-        
+    #최종에서 찌그러지지 않게 다시 처리 //TODO 
+    
     res = {'image_url': image_url}
     return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기
 
@@ -304,7 +314,11 @@ def changeBack():
     prompt = data['prompt']
     vertical = int(data['y'])
     horizion = int(data['x'])
-    print(image_path, vertical, horizion)
+    original_width =int(data['OriginalX'])
+    original_height=int(data['OriginalY'])
+
+    target_size =1024
+    adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
     # image안에서 객체찾기 실행 -> 즉 model.compile
     everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
@@ -313,7 +327,7 @@ def changeBack():
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
-    prompt_process.point_prompt(points=[[horizion, vertical]], pointlabel=[1])
+    prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
     mask_result = prompt_process.results #마스킹한 데이터를 담고있는 객체
     print(mask_result) 
     masked_array = np.array(mask_result[0].masks.data[0]) # 객체에서 0번 데이터를 numpy_array로 처리  -> 여기서 오류 도와줘요 명훈쌤
@@ -323,9 +337,9 @@ def changeBack():
     #그다음에는 생성 mask한 부분만 prompt를 background로 해서 생성하면 됨 -> 즉 생성모델
     #Karlo api에 보낼 수 있게 디코딩/인코딩
     # 이미지를 Base64 인코딩하기
-    image = Image.open(image_path)
+    resized_img=image_resize(image_path,original_width, original_height)
 
-    img_base64 = imageToString(image)
+    img_base64 = imageToString(resized_img)
     mask_base64 = imageToString(mask_image)
 
     # 이미지 변환하기 REST API 호출
