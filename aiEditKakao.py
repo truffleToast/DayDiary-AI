@@ -12,8 +12,6 @@ import numpy as np
 import io
 from io import BytesIO
 import base64
-import tempfile
-
 
 # app.py
 from flask_wtf import FlaskForm
@@ -79,7 +77,8 @@ def inpainting(image, mask, prompt):
             json = {
                 'prompt': prompt,
                 'image': image,
-                'mask': mask # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
+                'mask': mask, # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
+                'negative_prompt':'blurry, low_quality, watermark'
             },
             headers = {
                 'Authorization': f'KakaoAK {REST_API_KEY}',
@@ -97,35 +96,50 @@ def imageToString(img): #Karlo API 코드이므로 건들 필요 X
     my_encoded_img = base64.encodebytes(img_byte_arr.getvalue()).decode('ascii') 
     return my_encoded_img
 
-
-
 #1024 * 1024 비율에 맞게 조정하기 사용자 위치 수정하기
-def adjust_coordinates(orginal_width, orginal_height, target_size,  horizion, vertical):
-    if orginal_width > target_size:
-        x_ratio = target_size / orginal_width
-    else:
-        x_ratio = 1    
-    if orginal_height >1024:    
-        y_ratio = target_size / orginal_height
-    else:
-        y_ratio = 1 
-    adjusted_x = int(horizion * x_ratio)
-    adjusted_y = int(vertical * y_ratio)
-    return adjusted_x, adjusted_y
+def adjust_coordinates(original_width, original_height, target_size, horizion, vertical):
+    adjusted_x = horizion
+    adjusted_y = vertical
 
-def image_resize(image_path,original_width, original_height):
-    with Image.open(image_path) as img:
-        # 원본 이미지의 가로와 세로 비율 계산
-        ratio = min(1024 / original_width, 1024 / original_height)
-        # 새로운 크기 계산
-        new_width = int(original_width * ratio)
-        new_height = int(original_height * ratio)
+    while original_width > target_size or original_height > target_size:
+        x_ratio = target_size / original_width if original_width > target_size else 1
+        y_ratio = target_size / original_height if original_height > target_size else 1
+
+        # 좌표 조정
+        adjusted_x = int(adjusted_x * x_ratio)
+        adjusted_y = int(adjusted_y * y_ratio)
 
         # 이미지 크기 조정
-        resized_img = img.resize((new_width, new_height), Image.ANTIALIAS)
+        original_width = int(original_width * x_ratio)
+        original_height = int(original_height * y_ratio)
 
+    return adjusted_x, adjusted_y
+
+
+# karlo에 보내기 위해 1024*1024로 축소
+def image_resize(image_path):
+    with Image.open(image_path) as img:
+
+        new_width = img.width
+        new_height = img.height
+        if new_width <=1024 and new_height <=1024:
+            return img
+        # 너비나 높이가 1024보다 작거나 같아질 때까지 반복
+        while new_width > 1024 or new_height > 1024:
+            ratio = min(1024 / new_width, 1024 / new_height)
+            new_width = int(new_width * ratio)
+            new_height = int(new_height * ratio)
+        # 최종 크기로 이미지 조정
+        resized_img = img.resize((new_width, new_height), Image.LANCZOS)
     return resized_img
 
+def restore_image(input_path, output_path, original_width, orginal_height):
+    with Image.open(input_path) as img:
+        restored_image =img.resize(original_width, orginal_height)
+        restored_image.save(output_path)
+        #이 데이터가 AWS로 가야됨
+
+    return restore_image    
 
 #FastSam 모델 활용하기
 Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
@@ -134,14 +148,7 @@ Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
 
 tempPath ="./images/temp"
 
-
-# 옮기기
-# 로컬에서 실제 폴더에 접근이 안되는 현상. 
-#CORS 플라스크 보안해제 -> localhost:8081에서나 localhost8080의 경우는 허락해준다. 원래는 SOP에 의해 하나의 프로토콜에서 오는것만 허락하게됨 
-# CORS(app, resources={r"/*": {"origins": ["http://localhost:8080", "http://localhost:8081"]}}) # localhost8081 localhost 8080 모두 가능
-#임시 이미지 저장 경로 설정
-# 임시 폴더 경로 설정
-# 이후에 파일 저장 로직 수행
+mask_image_path = "./images/temp/mask"
 
 @app.route("/rembg", methods = ['POST'])
 def removeBg():
@@ -233,12 +240,10 @@ def eraseMyImg():
     image_file.save(image_path)
     vertical = int(data['y'])
     horizion = int(data['x'])
-    original_width =int(data['OriginalX'])
-    original_height=int(data['OriginalY'])
-
+    original_width =int(data['originalX'])
+    original_height=int(data['originalY'])
     target_size =1024
     adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
-
     # image안에서 객체찾기 실행 -> 즉 model.compile
     everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
@@ -247,36 +252,17 @@ def eraseMyImg():
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
-    prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
-    mask_result = prompt_process.results #마스킹한 데이터를 담고있는 객체
-    print(mask_result) 
-    masked_array = np.array(mask_result[0].masks.data[0]) # 객체에서 0번 데이터를 numpy_array로 처리  -> 여기서 오류 도와줘요 명훈쌤
-    masked_array = masked_array == False #편집할 영역이 검정이어야 하므로 이렇게 처리합니다.
-    mask_image = Image.fromarray(masked_array) 
-    #그다음에는 생성 mask한 부분만 prompt를 background로 해서 생성하면 됨 -> 즉 생성모델
-    #Karlo api에 보낼 수 있게 디코딩/인코딩
-    # prompt 설정 -> 여기서는 background
+    mask_result = prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
+    masked_array = np.array(mask_result[0].masks.data[0])    
+    mask_image = Image.fromarray(masked_array)
+    mask_image.save(f"{mask_image_path}.png")
+    resized_mask =image_resize(f"{mask_image_path}.png")
     prompt = "background"
-
-
-
-
-    #이미지 가능 부분이 1024 * 1024 이므로 이미지를 그에 맞게 축소하는 로직이 필요할 듯 함
-    # 원본이미지를 1024 * 1024로 바꿔야
-    #이미지 원본의 크기를
-    #이미지 원본의 크기를 보내고
-    # 그걸 python 변수로 저장 한다
-    # 이미지 처리 후
-    # 해당 이미지 원본 크기만큼 늘려서 저장하면
-    
-    # 11.30 일 추가부분
-
-
-    resized_img=image_resize(image_path,original_width, original_height)
-
+    resized_img=image_resize(image_path)
+    #resized_img의 크기랑 안맞음
     # 이미지를 Base64 인코딩하기
     img_base64 = imageToString(resized_img)
-    mask_base64 = imageToString(mask_image)
+    mask_base64 = imageToString(resized_mask)
 
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
@@ -299,11 +285,6 @@ def changeBack():
     # 폼 데이터를 변수 data에 저장
     data= request.form
     image_file = request.files['image']
-    #임시 파일 생성 및 저장
-    # with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file: # 임시폴더 만들어서 png로 저장시키고 
-    #    image = Image.open(image_file.stream)
-    #    image.save(temp_file.name)
-    #     temp_file_path = temp_file.name
     filename = image_file.filename 
     file_extension = filename.split('.')[-1].lower()
     file_name =randomTime() #자바는 클라이언트이므로 불가 -> 서버에서 처리하는게 좋음
@@ -313,8 +294,8 @@ def changeBack():
     prompt = data['prompt']
     vertical = int(data['y'])
     horizion = int(data['x'])
-    original_width =int(data['OriginalX'])
-    original_height=int(data['OriginalY'])
+    original_width =int(data['originalX'])
+    original_height=int(data['originalY'])
 
     target_size =1024
     adjusted_horizon, adjusted_vertical = adjust_coordinates(original_width, original_height, target_size, horizion, vertical)
@@ -322,32 +303,33 @@ def changeBack():
     everything_results = Samodel(image_path, device='cpu', retina_masks=True, imgsz=1024, conf=0.4, iou=0.9)
     # model.compile2 -> 어디서 실행할 것인가 , cpu, 객체 둘
     prompt_process = FastSAMPrompt(image_path, everything_results, device='cpu')
-    #사용자가 지정한 위치에서 모든 범위를 확인해야함 
-    # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
-    prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
-    mask_result = prompt_process.results #마스킹한 데이터를 담고있는 객체
-    print(mask_result) 
-    masked_array = np.array(mask_result[0].masks.data[0]) # 객체에서 0번 데이터를 numpy_array로 처리  -> 여기서 오류 도와줘요 명훈쌤
-#   masked_array = masked_array == False    
-    print(masked_array)
-    mask_image = Image.fromarray(masked_array) 
-    #그다음에는 생성 mask한 부분만 prompt를 background로 해서 생성하면 됨 -> 즉 생성모델
+    mask_result = prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
+    masked_array = np.array(mask_result[0].masks.data[0])    
+    mask_image = Image.fromarray(masked_array)
+    #Sagmentaition 완료
+
+    mask_image.save(f"{mask_image_path}.png")
+
+    #마스크 크기와 실제 이미지 크기를 resize
+    resized_mask =image_resize(f"{mask_image_path}.png")
+    resized_img=image_resize(image_path)
+   
+    
     #Karlo api에 보낼 수 있게 디코딩/인코딩
     # 이미지를 Base64 인코딩하기
-    resized_img=image_resize(image_path,original_width, original_height)
-
     img_base64 = imageToString(resized_img)
-    mask_base64 = imageToString(mask_image)
-
+    mask_base64 = imageToString(resized_mask)
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
     #로컬에 있는 데이터 삭제    
     os.remove(image_path)
-    print(response)
+    os.remove(f"mask_image_path.png")
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
+
+
     res = {'image_url': image_url}
     return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기 
 
