@@ -74,10 +74,11 @@ def inpainting(image, mask, prompt):
     
         r = requests.post(
             'https://api.kakaobrain.com/v2/inference/karlo/inpainting',
-            json = {
+            json = {        
                 'prompt': prompt,
                 'image': image,
-                'mask': mask # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
+                'mask': mask, # 편집할 영역이 검정 즉 -> 거꾸로 바꿔야 함
+                'image_format' : 'png'
      
             },
             headers = {
@@ -132,13 +133,7 @@ def image_resize(image_path):
         resized_img = img.resize((new_width, new_height), Image.LANCZOS)
         return resized_img
 
-def restore_image(input_path, output_path, original_width, orginal_height):
-    with Image.open(input_path) as img:
-        restored_image =img.resize(original_width, orginal_height)
-        restored_image.save(output_path)
-        #이 데이터가 AWS로 가야됨
 
-    return restore_image    
 
 #FastSam 모델 활용하기
 Samodel = FastSAM('FastSAM-x.pt')  # or FastSAM-x.pt
@@ -168,7 +163,7 @@ def removeBg():
         # img_byte_arr = img_byte_arr.getvalue()
 
         # aws 업로드 하는 로직
-        folder_path = 'EditPage/Flask_img/'     
+        folder_path = 'EditPage/Flask_img/bg_removed/'     
       
         # secure_filename(input.filename)
         key = folder_path + file_name +"_nobg.png"
@@ -203,9 +198,6 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
         print(image_url)
         res= {'image_url': image_url} #client는 json 객체를 뜯어서 src를 확인하고 그것을 유저에게 띄워줌
         return jsonify(res) #ajax로 돌아가 함수 구현
-            # 이거는 출력결과 -> 예시
-            #응답 방식 HTTP/1.1 200 OK 
-            # Content-Type: application/json
             # {
             #     "id": "3d6fb820-9845-4b3e-8d6d-7cfd01db5649",
             #     "model_version": "${MODEL_VERSION}",
@@ -215,8 +207,6 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
             #             "seed": 3878985944,
             #             "image": "https://mk.kakaocdn.net/dna/karlo/image/..."
             #         }
-            #     ]
-            # }
     else:
         print("실패")
         # 요청이 실패했을 경우 오류 처리
@@ -248,19 +238,24 @@ def eraseMyImg():
     # points default [[0,0]] [[x1,y1],[x2,y2]] 포인트의 default는 [[0,0]] , [[x1, y1] , [x2,y2]] 
     # point_label default [0] [1,0] 0:background, 1:foreground
     # point_lable default는 0: 배경 1: 배경이 아닌 객체 탐지
+
+    #fastSAM
     mask_result = prompt_process.point_prompt(points=[[adjusted_horizon, adjusted_vertical]], pointlabel=[1])
     masked_array = np.array(mask_result[0].masks.data[0])    
     mask_image = Image.fromarray(masked_array)
     mask_image.save(image_path+"mask.png")
-    prompt = "background"
+
+    #이미지 크기 조절 -> KARLO 크기에 맞춰
     resized_mask =image_resize(image_path+"mask.png")
     resized_img=image_resize(image_path+file_extension)
-
-
 
     # 이미지를 Base64 인코딩하기
     img_base64 = imageToString(resized_img)
     mask_base64 = imageToString(resized_mask)
+    
+    # 들어갈 prompt
+    prompt = "remove object from background"
+
 
     # 이미지 변환하기 REST API 호출
     response = inpainting(img_base64,mask_base64,prompt)
@@ -268,11 +263,28 @@ def eraseMyImg():
     #로컬에 있는 데이터 삭제    
     os.remove(image_path+file_extension)
     os.remove(image_path+"mask.png")
+
     # 응답의 첫 번째 이미지 생성 결과 출력하기
-    image_url = response["images"][0].get("image")
-    #최종에서 찌그러지지 않게 다시 처리 //TODO 
+    maked_img_path = response["images"][0].get("image")
+    #원래 크기로 리사이징
+    maked_img =Image.open(maked_img_path)
+
+    maked_img =maked_img.resize([original_width, original_height], Image.LANCZOS)
     
-    res = {'image_url': image_url}
+
+    
+    # aws 업로드 하는 로직
+    folder_path = 'EditPage/Flask_img/aiEraser/'     
+    key = folder_path +file_name + ".png"
+    img_byte_arr = BytesIO()
+    maked_img.save(img_byte_arr, format='PNG')
+
+
+     # S3에 이미지 업로드
+    s3.upload_fileobj(BytesIO(img_byte_arr.getvalue()), S3_BUCKET, key)
+    s3image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
+
+    res = {'image_url': s3image_url}
     return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기
 
 
@@ -322,9 +334,29 @@ def changeBack():
     os.remove(image_path+"mask.png")
     # 응답의 첫 번째 이미지 생성 결과 출력하기
     image_url = response["images"][0].get("image")
+    maked_img_path =f"{randomTime()}+maked_img.png"
+    image_url.save(maked_img_path)
+    
+    #원래 크기로 리사이징
+    maked_img =Image.open(maked_img_path)
+
+    maked_img =maked_img.resize([original_width, original_height], Image.LANCZOS)
+    
+    # 응답 후에 aws로 보내기
+    # secure_filename(input.filename)
+    img_byte_arr = BytesIO()
+    maked_img.save(img_byte_arr, format='PNG')
+
+    # aws 업로드 하는 로직
+    folder_path = 'EditPage/Flask_img/changeBg/'
+    key = folder_path + file_name
+
+    # S3에 이미지 업로드
+    s3.upload_fileobj(BytesIO(img_byte_arr.getvalue()), S3_BUCKET, key)
+    s3image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
 
 
-    res = {'image_url': image_url}
+    res = {'image_url': s3image_url}
     return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기 
 
 if __name__ == '__main__':
