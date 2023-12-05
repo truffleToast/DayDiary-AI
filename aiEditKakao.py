@@ -34,7 +34,7 @@ def randomTime():
     return str(random_number)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)   
 app.config['SECRET_KEY'] = 'your_secret_key'
 
 class UploadForm(FlaskForm):
@@ -185,19 +185,28 @@ def makeimg(): #Karlo ai 모델 -> diffusion 기반 카카오 api
     # result = Image.open(urllib.request.urlopen(response.get("images")[0].get("image"))) #PIL이미지로 OPEN flask환경에서는 작동되지 않음.
     # result가 있다면 spring에 result를 반환
     if response:
-        image_url = response["images"][0].get("image")
-        print(image_url)
-        res= {'image_url': image_url} #client는 json 객체를 뜯어서 src를 확인하고 그것을 유저에게 띄워줌
-        return jsonify(res) #ajax로 돌아가 함수 구현
-            # {
-            #     "id": "3d6fb820-9845-4b3e-8d6d-7cfd01db5649",
-            #     "model_version": "${MODEL_VERSION}",
-            #     "images": [
-            #         {
-            #             "id": "a80108f8-b9c6-4bf4-aa38-957a38ced4a8",
-            #             "seed": 3878985944,
-            #             "image": "https://mk.kakaocdn.net/dna/karlo/image/..."
-            #         }
+        maked_img_path = response["images"][0].get("image")
+        print(maked_img_path)
+        # URL로부터 이미지 데이터를 다운로드
+        Urlresponse = requests.get(maked_img_path)
+        Urlresponse.raise_for_status()  # 요청 실패시 예외 발생
+
+        # BytesIO를 사용하여 바이트 데이터를 이미지로 변환
+        image_data = BytesIO(Urlresponse.content)
+        maked_img = Image.open(image_data)
+        
+        # aws 업로드 하는 로직
+        folder_path = 'EditPage/Flask_img/makedImg/'     
+        key = folder_path +randomTime() + ".png"
+        img_byte_arr = BytesIO()
+        maked_img.save(img_byte_arr, format='PNG')
+
+        # S3에 이미지 업로드
+        s3.upload_fileobj(BytesIO(img_byte_arr.getvalue()), S3_BUCKET, key)
+        s3image_url = f'https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}'
+
+        res = {'image_url': s3image_url}
+        return jsonify(res) # 여기서 경로 -> eclipse로 가서 사용자에게 보여주기
     else:
         print("실패")
         # 요청이 실패했을 경우 오류 처리
@@ -278,7 +287,7 @@ def eraseMyImg():
 
     # BytesIO를 사용하여 바이트 데이터를 이미지로 변환
     image_data = BytesIO(Urlresponse.content)
-    maked_img = Image.open(image_data)
+    maked_img = Image.open(image_data)  
     maked_img =maked_img.resize((original_width, original_height), Image.LANCZOS)
     
 
@@ -388,3 +397,5 @@ def changeBack():
 if __name__ == '__main__':
     # 외부에서 접근 가능하도록 호스트 설정 ('0.0.0.0'으로 설정하면 모든 네트워크 인터페이스에서 접근 가능)
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+
+    
